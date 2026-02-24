@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- saved from url=(0059)file:///C:/Users/MIYAZAKI-PC/Downloads/hotapii_game_v8.html -->
+<!-- saved from url=(0061)file:///C:/Users/MIYAZAKI-PC/Downloads/hotapii_game_v8_1.html -->
 <html lang="ja"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
@@ -140,7 +140,7 @@ function reset(){
 function genLevel(sx){
   let x=sx,end=x+3200;
   // スピードが上がるとアイテム出現率UP
-  const itemRate=Math.min(0.18+spd*0.025,0.55);
+  const itemRate=Math.min(0.10+spd*0.012,0.30);
   const enemyRate=Math.min(0.18+dist/3500*0.45,0.70);
   const gapRate=Math.min(0.20+dist/8000*0.50,0.65);
   while(x<end){
@@ -168,7 +168,7 @@ function genLevel(sx){
       // 空中足場にもコインを置く
       if(Math.random()<0.7) coins.push({x:apx+apw/2,y:apy-38,got:false,a:Math.random()*6.28});
       // 空中足場にもアイテムを置く（少し高め）
-      if(Math.random()<0.3){
+      if(Math.random()<0.15){
         const tp=Math.random()<0.5?'shell':'feather';
         pups.push({x:apx+apw/2,y:apy-68,type:tp,ph:Math.random()*6.28,hue:0,got:false});
       }
@@ -303,20 +303,8 @@ function update(){
   if(onGnd&&frame%8===0)spawnDust(px+cw/4,py+ch,3);
   if(py>H+100){die();return;}
 
-  // giant destroy platforms - only walls/platforms strictly AHEAD, never underfoot
-  if(giantT>0){
-    plats=plats.filter(p=>{
-      const ppx=p.x-scrollX;
-      // プレイヤーが乗っているプラットフォームは絶対に壊さない
-      const isUnderfoot=(py+ch>=p.y-4&&py+ch<=p.y+12&&px+cw>ppx&&px<ppx+p.w);
-      if(isUnderfoot)return true;
-      // 前方にある障害物プラットフォームのみ破壊（プレイヤーより右にあるもの）
-      const aheadX=ppx>px+cw*0.3&&ppx<px+cw+120;
-      const overlapY=py+ch>p.y-10&&py<p.y+p.h;
-      if(aheadX&&overlapY){burst(ppx+p.w/2,p.y,'#8b4513',6);return false;}
-      return true;
-    });
-  }
+  // giant mode: プラットフォームは壊さない（落下防止）
+  // 敵への接触判定は下のenemiesループで処理
 
   // scallops
   for(const s of scallops){
