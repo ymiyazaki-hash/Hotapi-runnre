@@ -163,6 +163,7 @@ let mountItems=[],flames=[],exMounts=[],rings=[],banners=[];
 let nextMountX=0,lastMountType='',autoFireT=0,gameMount='dino';
 const MATE_START=10000/0.38,MATE_GAP=6000/0.38;  // 点数→ワールド座標（距離=座標×0.38）
 let beams=[],maouWarned=false;
+let shieldOn=false,shieldCount=0,shieldX=0;  // ホタテの盾
 const MOUNTS={
   dino:    {name:'ガウル',ic:'🦖',col:'#a5d6a7',saddle:'#e53935',short:'炎ブレス',skill:'炎をはく！（ダブルタップでも）'},
   rhino:   {name:'ゴンタ',ic:'🦏',col:'#eceff1',saddle:'#fb8c00',short:'体当たり',skill:'体当たりで敵をやっつける！'},
@@ -180,6 +181,7 @@ function reset(){
   mount=null;mountItems=[];flames=[];exMounts=[];rings=[];banners=[];
   nextMountX=MATE_START;lastMountType='';autoFireT=0;stageIdx=0;
   {const ks=Object.keys(MOUNTS);gameMount=ks[Math.floor(Math.random()*ks.length)];}flashT=0;beams=[];maouWarned=false;eshots=[];
+  shieldOn=false;shieldCount=0;shieldX=(4000+Math.random()*6000)/0.38;
   plats=[];
   for(let i=0;i<8;i++) plats.push({x:i*200,y:GROUND,w:200,h:115});
   genLevel(1600);bgIdx=0;
@@ -210,7 +212,11 @@ function genLevel(sx){
       enemies.push(makeMaou(x+pw/2-48,py2));hasMate=true;
     }
     if(!hasMate&&Math.random()<enemyRate) enemies.push(makeEnemy(x+pw/2,py2));
-    if(Math.random()<itemRate){
+    // ホタテの盾（1ゲームで2回くらい）
+    if(shieldCount<3&&x>=shieldX&&!hasMate){
+      pups.push({x:x+pw*0.5-scrollX,y:py2-72,type:'shield',ph:0,hue:0,got:false});
+      shieldCount++;shieldX=x+(13000+Math.random()*9000)/0.38;
+    }else if(Math.random()<itemRate){
       const tp=Math.random()<0.55?'shell':'feather';
       pups.push({x:x+pw*0.65-scrollX,y:py2-72,type:tp,ph:Math.random()*6.28,hue:0,got:false});
     }
@@ -479,12 +485,10 @@ function update(){
     if(!hit(px+8,py+8,cw-16,ch-16,ex+5,e.y+5,e.w-10,e.h-10))continue;
     if(mount==='rhino'&&e.type!=='maou'){killEnemy(e,'#cfd8dc');shake=6;continue;}  // ゴンタ：体当たり
     if(pInv>0||giantCool>0)continue;
-    if(e.type==='maou'){ // ライフ2つへる → 仲間がいても助からない
-      if(mount){exMounts.push({type:mount,x:px+cw/2,y:py+ch,vx:-2.5,vy:-10,rot:0,life:80,sc:giantSc});mount=null;}
-      shake=20;die();return;
-    }
-    if(mount){loseMount(false);[cw,ch]=pdim();continue;}
-    die();return;
+    // 大魔王はライフ2つ、ほかは1つ（盾 → 仲間 → ホタピィーの順にへる）
+    if(e.type==='maou')shake=20;
+    if(hurtPlayer(e.type==='maou'?2:1))return;
+    [cw,ch]=pdim();continue;
   }
 
   if(updateShots())return;
@@ -541,6 +545,12 @@ function collectPup(p,py2){
   }else if(p.type==='feather'){
     sfxFeather();featherT=7*60;
     burst(p.x,py2,'#88ffee',16);
+  }else if(p.type==='shield'){
+    sfxPow();
+    if(shieldOn)score+=300;
+    shieldOn=true;
+    burst(p.x,py2,'#ffd54f',18);
+    banners.push({text:'🛡️ ホタテの盾ゲット！',sub:'敵の攻撃を1回ふせぐホタ',life:140,col:'#ffe082'});
   }else if(p.type==='shell'){
     sfxPow();shellLv=Math.min(shellLv+1,10);
     const up={8:['💥 ホタテビーム解放！','上限突破 Lv8'],9:['✨ ホーミングホタテ解放！','上限突破 Lv9'],10:['☄️ ホタテメテオ解放！','上限突破 Lv10 MAX']}[shellLv];
@@ -630,6 +640,24 @@ function breathFire(){
   const ox=px+(46+56)*gs,oy=py+ch-62*gs;
   for(let i=0;i<7;i++)flames.push({x:ox,y:oy+(Math.random()-.5)*8*gs,vx:8+Math.random()*3,vy:(Math.random()-.5)*1.6,r:(8+Math.random()*4)*gs,life:30+Math.random()*8});
   sfxFire();
+}
+
+// ダメージ処理：盾 → 仲間 → ホタピィー。死んだら true
+function hurtPlayer(n){
+  while(n>0){
+    if(shieldOn){
+      shieldOn=false;n--;sfxGuard();shake=Math.max(shake,8);pInv=Math.max(pInv,90);
+      const [cw,ch]=pdim();burst(px+cw,py+ch*.45,'#ffd54f',16);burst(px+cw,py+ch*.45,'#fff8e1',10);
+      banners.push({text:'🛡️ 盾がまもってくれた！',sub:n>0?'でもまだダメージが…！':'',life:110,col:'#ffe082'});
+      continue;
+    }
+    if(mount){
+      if(n>1){const [cw,ch]=pdim();exMounts.push({type:mount,x:px+cw/2,y:py+ch,vx:-2.5,vy:-10,rot:0,life:80,sc:giantSc});const oh=ch;mount=null;py+=oh-pdim()[1];n--;continue;}
+      loseMount(false);n--;continue;
+    }
+    die();return true;
+  }
+  return false;
 }
 // ─── ステージ（背景）────────────────────────────────────────────────────
 // 昼 → 夕やけ → 夜の森 → おばけの森 → 火山 → 雲の上 → 宇宙の入り口 → 惑星 → 銀河の果て
@@ -869,8 +897,7 @@ function updateShots(){
     if(hit(px+10,py+10,cw-20,ch-20,sx-r,s.y-r*(s.type==='bolt'?2.5:1),r*2,r*(s.type==='bolt'?5:2))){
       if(pInv>0||giantCool>0)continue;
       s.life=0;
-      if(mount){loseMount(false);continue;}
-      die();return true;
+      if(hurtPlayer(1))return true;
     }
   }
   eshots=eshots.filter(s=>s.life>0&&s.y<H+40);
@@ -1337,6 +1364,9 @@ function drawPups(){
       ctx.beginPath();ctx.moveTo(0,-22);ctx.lineTo(0,20);ctx.stroke();
       for(let i=0;i<4;i++){const yo=-14+i*9;ctx.beginPath();ctx.moveTo(0,yo);ctx.lineTo(9,yo+4);ctx.stroke();ctx.beginPath();ctx.moveTo(0,yo);ctx.lineTo(-9,yo+4);ctx.stroke();}
       ctx.fillStyle='rgba(255,255,255,0.88)';ctx.font='bold 8px Arial';ctx.textAlign='center';ctx.fillText('🪶',0,4);
+    }else if(p.type==='shield'){
+      ctx.rotate(Math.sin(p.ph)*.12);drawShieldShape(0,0,18);
+      ctx.fillStyle='#fff';ctx.font='bold 9px Arial';ctx.textAlign='center';ctx.fillText('盾',0,30);
     }else{// shell
       ctx.rotate(Math.sin(p.ph)*.14);
       if(SIMG.complete&&SIMG.naturalWidth>0)ctx.drawImage(SIMG,-18,-18,36,36);
@@ -2050,7 +2080,30 @@ function drawPlayer(){
     ctx.drawImage(charCache,-PW/2,-PH/2,PW,PH);
     ctx.restore();
   }
+  if(shieldOn)drawShieldOn(cx2,py+ch*.48,giantSc);
   ctx.globalAlpha=1;
+}
+// 装備中のホタテの盾（体の前で光る）
+function drawShieldOn(x,y,sc){
+  ctx.save();ctx.globalAlpha=1;
+  ctx.strokeStyle=`rgba(255,213,79,${.35+Math.sin(frame*.15)*.15})`;ctx.lineWidth=3;
+  ctx.beginPath();ctx.ellipse(x,y,46*sc,58*sc,0,0,TAU);ctx.stroke();
+  ctx.translate(x+34*sc,y+Math.sin(frame*.1)*3);ctx.scale(sc,sc);
+  drawShieldShape(0,0,20);
+  ctx.restore();
+}
+function drawShieldShape(x,y,r){
+  ctx.save();ctx.translate(x,y);
+  ctx.fillStyle='rgba(255,236,150,.45)';ctx.beginPath();ctx.arc(0,0,r*1.35,0,TAU);ctx.fill();
+  // ホタテ形（扇）
+  ctx.fillStyle='#ffca28';ctx.strokeStyle='#e65100';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(-r*.3,r*.9);
+  for(let i=0;i<=8;i++){const g=Math.PI+i*Math.PI/8,rr=i%2?r:r*.9;ctx.lineTo(Math.cos(g)*rr,r*.2+Math.sin(g)*rr*1.1);}
+  ctx.lineTo(r*.3,r*.9);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.strokeStyle='rgba(230,81,0,.7)';ctx.lineWidth=1.5;
+  for(let i=1;i<8;i++){const g=Math.PI+i*Math.PI/8;ctx.beginPath();ctx.moveTo(0,r*.8);ctx.lineTo(Math.cos(g)*r*.85,r*.2+Math.sin(g)*r*.95);ctx.stroke();}
+  ctx.fillStyle='#fff8e1';ctx.beginPath();ctx.ellipse(-r*.35,-r*.35,r*.22,r*.12,-.5,0,TAU);ctx.fill();
+  ctx.restore();
 }
 
 // ─── 仲間の絵（原点＝足元の中心、右向き）──────────────────────────────
@@ -2197,7 +2250,7 @@ function drawHUD(){
   let yy=42;
   // ライフ
   ctx.font='18px sans-serif';ctx.textAlign='right';
-  ctx.fillText(mount?'❤️❤️':'❤️',W-12,28);
+  ctx.fillText((shieldOn?'🛡️':'')+(mount?'❤️❤️':'❤️'),W-12,28);
   ctx.textAlign='left';
   if(mount){
     const M=MOUNTS[mount];
