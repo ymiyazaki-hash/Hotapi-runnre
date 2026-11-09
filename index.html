@@ -233,7 +233,8 @@ function reset(){
   scallops=[];enemies=[];coins=[];pups=[];parts=[];dustp=[];
   mount=null;mountItems=[];flames=[];exMounts=[];rings=[];banners=[];
   nextMountX=MATE_START;lastMountType='';autoFireT=0;stageIdx=0;
-  {const ks=Object.keys(MOUNTS);gameMount=ks[Math.floor(Math.random()*ks.length)];}flashT=0;beams=[];maouWarned=false;eshots=[];zaps=[];airJ=0;lastK=0;
+  {const ks=Object.keys(MOUNTS);gameMount=ks[Math.floor(Math.random()*ks.length)];}flashT=0;beams=[];maouWarned=false;eshots=[];zaps=[];airJ=0;
+  hardOn=false;rbShield=0;rbX=(51000+Math.random()*4000)/0.38;mountHP=1;novaCD=0;lastK=0;
   shieldOn=false;shieldCount=0;shieldX=(4000+Math.random()*6000)/0.38;
   plats=[];
   for(let i=0;i<8;i++) plats.push({x:i*200,y:GROUND,w:200,h:115});
@@ -264,11 +265,19 @@ function genLevel(sx){
     if(!hasMate&&x*0.38>=30000&&pw>=150&&Math.random()<0.10&&!enemies.some(e=>e.type==='maou'&&!e.dead)){
       enemies.push(makeMaou(x+pw/2-48,py2));hasMate=true;
     }
+    // ダイヤゴーレム（50000点〜、攻撃が効かない）
+    if(!hasMate&&x*0.38>=HARD_D&&pw>=150&&Math.random()<0.07&&!enemies.some(e=>e.type==='golem'&&!e.dead)){
+      enemies.push(makeHardEnemy(x+pw/2-50,py2,'golem'));hasMate=true;
+    }
     if(!hasMate&&Math.random()<enemyRate) enemies.push(makeEnemy(x+pw/2,py2));
+    if(!hasMate&&x*0.38>=HARD_D&&pw>=150&&Math.random()<0.35) enemies.push(makeEnemy(x+pw*0.15,py2));  // ハードは敵が多い
     // ホタテの盾（1ゲームで2回くらい）
     if(shieldCount<3&&x>=shieldX&&!hasMate){
       pups.push({x:x+pw*0.5-scrollX,y:py2-72,type:'shield',ph:0,hue:0,got:false});
       shieldCount++;shieldX=x+(13000+Math.random()*9000)/0.38;
+    }else if(x*0.38>=HARD_D&&rbX>0&&x>=rbX&&!hasMate){   // 虹色バリア（50000点〜）
+      pups.push({x:x+pw*0.5-scrollX,y:py2-72,type:'rbshield',ph:0,hue:0,got:false});
+      rbX=x+(12000+Math.random()*6000)/0.38;
     }else if(Math.random()<itemRate){
       const tp=Math.random()<0.55?'shell':'feather';
       pups.push({x:x+pw*0.65-scrollX,y:py2-72,type:tp,ph:Math.random()*6.28,hue:0,got:false});
@@ -345,8 +354,11 @@ function makeEnemy(ex,platY){
   const d=ENEMY_DEF[tp],sc=ENEMY_SC,w=d.w*sc,h=d.h*sc;
   let y=platY-h-(d.fly?34:2);
   if(tp==='kaminari')y=70+Math.random()*60;
-  return{x:ex-(w-d.w)/2,y,w,h,sc,vy:0,dead:false,anim:Math.floor(Math.random()*60),
+  if(dist>=HARD_D&&Math.random()<0.38)return makeHardEnemy(ex,platY);
+  const e={x:ex-(w-d.w)/2,y,w,h,sc,vy:0,dead:false,anim:Math.floor(Math.random()*60),
          type:tp,jt:40+Math.floor(Math.random()*60),startY:0,vx:0,alpha:1};
+  if(dist>=HARD_D&&Math.random()<0.45)armorUp(e);  // ヨロイ：2発必要
+  return e;
 }
 
 // ─── Rainbow spawn ──────────────────────────────────────────────────────────
@@ -412,6 +424,7 @@ function fireHotate(){
   if(shellLv>=8)fireSuper();
   if(mount==='dino')breathFire();
   if(mount==='dragon')dragonBall();
+  fireNova();
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -431,6 +444,7 @@ function update(){
   scrollX+=spd;dist+=spd*0.38;score=Math.floor(dist);
   if(frame%18===0)bgmTick();
   checkStage();
+  updateHardPlayer();
   {const k=Math.floor(dist/1000);if(k>lastK){lastK=k;sfxDing();}}  // 1000点ごとのチャイム
 
   // timers
@@ -484,10 +498,10 @@ function update(){
   }
 
   // ガウル：自動で炎
-  if(mount==='dino'){autoFireT--;if(autoFireT<=0){breathFire();autoFireT=110;}}
+  if(mount==='dino'){autoFireT--;if(autoFireT<=0){breathFire();autoFireT=isHard()?60:110;}}
   // ドラコ：ときどき火の玉 ／ リュウ：カミナリ
-  if(mount==='dragon'){autoFireT--;if(autoFireT<=0){dragonBall();autoFireT=150;}}
-  if(mount==='ryu'){autoFireT--;if(autoFireT<=0)autoFireT=ryuThunder()?220:20;}
+  if(mount==='dragon'){autoFireT--;if(autoFireT<=0){dragonBall();autoFireT=isHard()?80:150;}}
+  if(mount==='ryu'){autoFireT--;if(autoFireT<=0)autoFireT=ryuThunder()?(isHard()?120:220):20;}
   // ブーブー：穴の手前で自動ジャンプ
   if(mount==='car'&&onGnd&&!jumping){
     const fx=scrollX+px+cw+24;
@@ -528,7 +542,7 @@ function update(){
     for(const e of enemies){
       if(e.dead||e.hitCool>0)continue;
       const ex=e.x-scrollX;
-      if(ex+e.w>b.x&&ex<W&&e.y<b.y+b.h/2&&e.y+e.h>b.y-b.h/2)hurtEnemy(e,1,'#ff80ab');
+      if(ex+e.w>b.x&&ex<W&&e.y<b.y+b.h/2&&e.y+e.h>b.y-b.h/2)hurtEnemy(e,b.dmg||1,'#ff80ab');
     }
   }
   beams=beams.filter(b=>b.life>0);
@@ -550,14 +564,17 @@ function update(){
     }
     if(!hit(px+8,py+8,cw-16,ch-16,ex+5,e.y+5,e.w-10,e.h-10))continue;
     if(mount==='bike'&&pvy>0&&py+ch<e.y+e.h*0.6){ // ブンブン：ふみつけ
+      if(e.invul){pvy=-12;airJ=0;bounceInvul(e);continue;}
       if(e.type==='maou'){hurtEnemy(e,3,'#ffb74d');pInv=Math.max(pInv,30);}else killEnemy(e,'#ffb74d');
       pvy=-12;airJ=0;sfxCrash();continue;
     }
-    if((mount==='rhino'||mount==='car')&&e.type!=='maou'){killEnemy(e,'#cfd8dc');shake=6;sfxCrash();continue;}  // ゴンタ：体当たり
+    if((mount==='rhino'||mount==='car')&&e.type==='maou'&&isHard()){if(!(e.hitCool>0))hurtEnemy(e,3,'#cfd8dc');pInv=Math.max(pInv,40);continue;}
+    if((mount==='rhino'||mount==='car')&&e.type!=='maou'&&!e.invul){killEnemy(e,'#cfd8dc');shake=6;sfxCrash();continue;}  // ゴンタ：体当たり
+    if(rbShield>0&&!e.invul&&e.type!=='maou'){killEnemy(e,'#ffffff');continue;}  // 虹色バリア：さわった敵をやっつける
     if(pInv>0||giantCool>0)continue;
     // 大魔王はライフ2つ、ほかは1つ（盾 → 仲間 → ホタピィーの順にへる）
-    if(e.type==='maou')shake=20;
-    if(hurtPlayer(e.type==='maou'?2:1))return;
+    if(e.type==='maou'||e.invul)shake=20;
+    if(hurtPlayer(e.type==='maou'||e.invul?2:1))return;
     [cw,ch]=pdim();continue;
   }
 
@@ -617,6 +634,9 @@ function collectPup(p,py2){
   }else if(p.type==='feather'){
     sfxFeather();featherT=7*60;
     burst(p.x,py2,'#88ffee',16);
+  }else if(p.type==='rbshield'){
+    sfxRainbow();rbShield=3;burst(p.x,py2,'#ff80ab',24);
+    banners.push({text:'🌈 虹色バリアゲット！',sub:'3回ふせぐ＆さわった敵をやっつける',life:150,col:'#ffffff'});
   }else if(p.type==='shield'){
     sfxPow();
     if(shieldOn)score+=300;
@@ -624,8 +644,8 @@ function collectPup(p,py2){
     burst(p.x,py2,'#ffd54f',18);
     banners.push({text:'🛡️ ホタテの盾ゲット！',sub:'敵の攻撃を1回ふせぐホタ',life:140,col:'#ffe082'});
   }else if(p.type==='shell'){
-    sfxPow();shellLv=Math.min(shellLv+1,10);
-    const up={8:['💥 ホタテビーム解放！','上限突破 Lv8'],9:['✨ ホーミングホタテ解放！','上限突破 Lv9'],10:['☄️ ホタテメテオ解放！','上限突破 Lv10 MAX']}[shellLv];
+    sfxPow();shellLv=Math.min(shellLv+1,isHard()?13:10);
+    const up={8:['💥 ホタテビーム解放！','上限突破 Lv8'],9:['✨ ホーミングホタテ解放！','上限突破 Lv9'],10:['☄️ ホタテメテオ解放！','上限突破 Lv10 MAX'],11:['🌈 ギガビーム解放！','超・上限突破 Lv11'],12:['🛰️ ホタテ衛星解放！','超・上限突破 Lv12'],13:['💫 ホタテ・ノヴァ解放！','超・上限突破 Lv13 ULTRA']}[shellLv];
     if(up)banners.push({text:up[0],sub:up[1],life:140,col:'#ffd54f'});
     burst(p.x,py2,'#ffcc44',16);
   }
@@ -634,6 +654,7 @@ function collectPup(p,py2){
 // ─── 仲間システム ─────────────────────────────────────────────────────────
 function pdim(){const b=mount?[MCW,MCH]:[PW,PH];return[b[0]*giantSc,b[1]*giantSc];}
 function killEnemy(e,col){
+  if(e.invul){bounceInvul(e);return;}
   e.dead=true;sfxKill();
   const ex=e.x-scrollX;
   if(e.type==='maou'){
@@ -643,6 +664,7 @@ function killEnemy(e,col){
   }else{score+=150;sfxPop();burst(ex+e.w/2,e.y+e.h/2,col,12);}
 }
 function hurtEnemy(e,dmg,col){
+  if(e.invul){bounceInvul(e);return;}
   if(e.hp&&e.hp>dmg){
     e.hp-=dmg;e.hitCool=8;e.flash=6;
     if(e.type==='maou')sfxBossHit();else beep(260,'square',0.05,0.2);
@@ -655,7 +677,7 @@ function hurtEnemy(e,dmg,col){
 function fireSuper(){
   const [cw,ch]=pdim();
   const ox=px+cw,oy=py+ch*0.42;
-  beams.push({x:ox,y:oy,h:46*giantSc,life:22});
+  beams.push({x:ox,y:oy,h:(shellLv>=11?80:46)*giantSc,life:22,dmg:shellLv>=11?2:1});
   if(shellLv>=9){
     const n=shellLv>=10?8:6;
     for(let i=0;i<n;i++){const a=-1.2+i*2.4/(n-1);scallops.push({x:ox,y:oy,w:34,h:34,vx:Math.cos(a)*10,vy:Math.sin(a)*10,life:130,rot:0,homing:true});}
@@ -674,6 +696,8 @@ function rideMount(tp){
   burst(px+pdim()[0]/2,py+nh/2,MOUNTS[tp].col,20);
   banners.push({text:MOUNTS[tp].ic+' '+MOUNTS[tp].name+'に乗った！',sub:MOUNTS[tp].skill,life:150,col:'#ffffff'});
   autoFireT=40;
+  mountHP=isHard()?2:1;
+  if(isHard())banners.push({text:'⚡ スーパー'+MOUNTS[tp].name+'！',sub:'2回まで耐える＆わざがパワーアップ',life:150,col:'#ffd54f'});
 }
 function loseMount(fromFall){
   const [cw,ch]=pdim();
@@ -704,7 +728,7 @@ function stomp(){
   for(const e of enemies){
     if(e.dead)continue;
     const ex=e.x-scrollX+e.w/2;
-    if(ex>-20&&ex<W+20&&Math.abs(ex-fx)<300&&e.y+e.h>fy-160)hurtEnemy(e,3,'#bcaaa4');
+    if(ex>-20&&ex<W+20&&Math.abs(ex-fx)<(isHard()?W:300)&&e.y+e.h>fy-(isHard()?400:160))hurtEnemy(e,3,'#bcaaa4');
   }
 }
 function breathFire(){
@@ -717,6 +741,12 @@ function breathFire(){
 // ダメージ処理：盾 → 仲間 → ホタピィー。死んだら true
 function hurtPlayer(n){
   while(n>0){
+    if(rbShield>0){
+      rbShield--;n--;sfxShieldBlock();shake=Math.max(shake,8);pInv=Math.max(pInv,90);
+      const [cw,ch]=pdim();burst(px+cw/2,py+ch/2,'#ff80ab',18);
+      banners.push({text:'🌈 虹色バリアがまもった！',sub:'のこり '+rbShield+' 回',life:100,col:'#ffffff'});
+      continue;
+    }
     if(shieldOn){
       shieldOn=false;n--;sfxShieldBlock();shake=Math.max(shake,8);pInv=Math.max(pInv,90);
       const [cw,ch]=pdim();burst(px+cw,py+ch*.45,'#ffd54f',16);burst(px+cw,py+ch*.45,'#fff8e1',10);
@@ -724,6 +754,7 @@ function hurtPlayer(n){
       continue;
     }
     if(mount){
+      if(mountHP>1){mountHP--;n--;sfxGuard();pInv=Math.max(pInv,90);shake=Math.max(shake,8);banners.push({text:'⚡ スーパー'+MOUNTS[mount].name+'がたえた！',sub:'次に当たるといなくなるよ',life:110,col:'#ffd54f'});continue;}
       if(n>1){const [cw,ch]=pdim();exMounts.push({type:mount,x:px+cw/2,y:py+ch,vx:-2.5,vy:-10,rot:0,life:80,sc:giantSc});const oh=ch;mount=null;py+=oh-pdim()[1];n--;continue;}
       loseMount(false);n--;continue;
     }
@@ -735,6 +766,7 @@ function hurtPlayer(n){
 function dragonBall(){
   const gs=giantSc,[cw,ch]=pdim();
   flames.push({x:px+cw,y:py+ch-70*gs,vx:9,vy:0,r:15*gs,life:55,grow:0.18});
+  if(isHard())for(const vy of [-2.2,2.2])flames.push({x:px+cw,y:py+ch-70*gs,vx:8.5,vy,r:13*gs,life:50,grow:0.15});
   sfxFire();
 }
 function ryuThunder(){
@@ -824,6 +856,270 @@ function checkStage(){
   if(ENV&&ENV.dead>0.8&&flashT===0&&Math.random()<0.004){flashT=10;beep(70,'sawtooth',0.5,0.25);}
   if(ENV&&ENV.vol>0.8&&Math.random()<0.002){shake=Math.max(shake,7);beep(55,'sine',0.4,0.35);}
 }
+// ═══ ハードモード（50000点〜）════════════════════════════════════════════
+const HARD_D=50000;
+function isHard(){return dist>=HARD_D;}
+let hardOn=false,rbShield=0,rbX=0,mountHP=1,novaCD=0,satA=0;
+
+// ─── 強い敵 ───────────────────────────────────────────────────────────────
+const HARD_DEF={
+  golem:{w:80,h:96,fly:0,hp:0},   // ダイヤゴーレム：攻撃が効かない（最強）
+  mecha:{w:56,h:76,fly:0,hp:4},   // メカホタテ：ミサイル
+  hone: {w:84,h:52,fly:1,hp:3},   // ホネドラゴン：むらさきの火の玉
+  kage: {w:44,h:62,fly:0,hp:2}    // カゲ忍者：手裏剣3連
+};
+function makeHardEnemy(ex,platY,tp){
+  if(!tp){const r=Math.random();tp=r<.36?'mecha':r<.7?'hone':'kage';}
+  const d=HARD_DEF[tp],sc=tp==='golem'?1.25:1.25,w=d.w*sc,h=d.h*sc;
+  let y=platY-h-(d.fly?40:2);
+  const e={x:ex-(w-d.w)/2,y,w,h,sc,vy:0,dead:false,anim:Math.floor(Math.random()*60),
+     type:tp,jt:60+Math.floor(Math.random()*60),startY:0,vx:0,alpha:1,hitCool:0,flash:0};
+  if(d.hp){e.hp=d.hp;e.maxHp=d.hp;}
+  if(tp==='golem')e.invul=true;
+  return e;
+}
+// ふつうの敵をヨロイ付き（2発必要）にする
+function armorUp(e){if(!e.hp&&e.type!=='kaminari'){e.hp=2;e.maxHp=2;e.armor=1;e.hitCool=0;e.flash=0;}return e;}
+
+function updateHard(e){
+  const ex=e.x-scrollX;
+  if(e.flash>0)e.flash--;
+  switch(e.type){
+    case 'golem':
+      e.vy+=0.72;e.y+=e.vy;
+      {const was=e.vy>4;landE(e);if(was&&e.vy===0&&ex<W&&ex>-e.w){shake=Math.max(shake,8);sfxBoom();}}
+      if(ex<W)e.x-=0.7;
+      e.jt--;if(e.jt<=0&&e.vy===0){e.vy=-9;e.jt=120+Math.floor(Math.random()*60);}
+      return true;
+    case 'mecha':
+      e.vy+=0.72;e.y+=e.vy;landE(e);
+      e.jt--;
+      if(e.jt<=0&&ex>px+60&&ex<W-10){
+        eshots.push({x:e.x+e.w*0.3,y:e.y+e.h*0.25,vx:-3,vy:-2,type:'missile',life:220,home:1});
+        sfxLaser();e.jt=120+Math.floor(Math.random()*40);
+      }
+      return true;
+    case 'hone':
+      if(!e.startY)e.startY=e.y-20;
+      e.y=e.startY+Math.sin(e.anim*0.04)*30;
+      e.x+=Math.sin(e.anim*0.02)*1.2;
+      e.jt--;
+      if(e.jt<=0&&ex>px+60&&ex<W-10){
+        const dx=px+30-(ex+e.w*0.2),dy=py+40-(e.y+e.h*0.5),d=Math.hypot(dx,dy)||1;
+        eshots.push({x:e.x+e.w*0.15,y:e.y+e.h*0.45,vx:dx/d*4.2,vy:dy/d*4.2,type:'porb',life:200});
+        sfxFireRoar();e.jt=100;
+      }
+      return true;
+    case 'kage':
+      e.vy+=0.72;e.y+=e.vy;landE(e);
+      e.jt--;
+      if(e.jt<=0&&e.vy===0&&ex<W-10&&ex>px+40){
+        for(const vy of [-1.6,0,1.6])eshots.push({x:e.x,y:e.y+22,vx:-6.5,vy,type:'shuriken',life:160});
+        sfxWhoosh();e.vy=-16;e.jt=70+Math.floor(Math.random()*30);
+      }
+      return true;
+  }
+  return false;
+}
+function bounceInvul(e){
+  if(e.hitCool>0)return;
+  e.hitCool=10;e.flash=4;
+  if(sfxOK('kin',120)){beep(2200,'square',.05,.15);beep(3000,'sine',.12,.12,.03);}
+  const ex=e.x-scrollX;burst(ex+e.w/2,e.y+e.h*0.4,'#e1f5fe',5);
+}
+
+// ─── 絵 ───────────────────────────────────────────────────────────────────
+function drawHard(e,cx,bot,a){
+  switch(e.type){
+    case 'golem':drawGolem(cx,bot,a,e);return true;
+    case 'mecha':drawMecha(cx,bot,a,e);return true;
+    case 'hone': drawHone(cx,bot,a,e);return true;
+    case 'kage': drawKage(cx,bot,a,e);return true;
+  }
+  return false;
+}
+function drawGolem(cx,bot,a,e){
+  ctx.save();ctx.translate(cx,bot);
+  const st=Math.sin(a*.12)*3;
+  // オーラ
+  ctx.fillStyle=`hsla(${a*4%360},90%,70%,.18)`;ctx.beginPath();ctx.ellipse(0,-48,54,58,0,0,TAU);ctx.fill();
+  // 足
+  ctx.fillStyle='#5e35b1';ctx.beginPath();ctx.moveTo(-26+st,0);ctx.lineTo(-30+st,-24);ctx.lineTo(-8+st,-24);ctx.lineTo(-10+st,0);ctx.fill();
+  ctx.beginPath();ctx.moveTo(10-st,0);ctx.lineTo(8-st,-24);ctx.lineTo(30-st,-24);ctx.lineTo(26-st,0);ctx.fill();
+  // からだ（ダイヤ）
+  const g=ctx.createLinearGradient(-36,-80,36,-20);g.addColorStop(0,'#b388ff');g.addColorStop(.5,'#e1f5fe');g.addColorStop(1,'#7c4dff');
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.moveTo(0,-90);ctx.lineTo(36,-66);ctx.lineTo(30,-24);ctx.lineTo(-30,-24);ctx.lineTo(-36,-66);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(0,-90);ctx.lineTo(0,-24);ctx.moveTo(-36,-66);ctx.lineTo(36,-66);ctx.moveTo(-30,-24);ctx.lineTo(0,-66);ctx.lineTo(30,-24);ctx.stroke();
+  // うで
+  ctx.fillStyle='#7c4dff';
+  ctx.beginPath();ctx.moveTo(-34,-70);ctx.lineTo(-52,-50+st);ctx.lineTo(-46,-26+st);ctx.lineTo(-34,-40);ctx.fill();
+  ctx.beginPath();ctx.moveTo(34,-70);ctx.lineTo(52,-50-st);ctx.lineTo(46,-26-st);ctx.lineTo(34,-40);ctx.fill();
+  ctx.fillStyle='#e1f5fe';ctx.beginPath();ctx.arc(-46,-24+st,9,0,TAU);ctx.arc(46,-24-st,9,0,TAU);ctx.fill();
+  // 頭
+  ctx.fillStyle='#4527a0';ctx.beginPath();ctx.moveTo(-16,-88);ctx.lineTo(16,-88);ctx.lineTo(12,-106);ctx.lineTo(-12,-106);ctx.closePath();ctx.fill();
+  const gl=.6+Math.sin(a*.2)*.4;
+  ctx.fillStyle=`rgba(0,229,255,${gl})`;ctx.fillRect(-11,-100,8,4);ctx.fillRect(3,-100,8,4);
+  // キラキラ
+  for(let i=0;i<3;i++){const t=(a*.05+i*2.1);ctx.fillStyle='#fff';ctx.font='12px sans-serif';ctx.fillText('✦',Math.cos(t)*40-4,-60+Math.sin(t*1.3)*36);}
+  if(e.flash>0){ctx.globalCompositeOperation='lighter';ctx.fillStyle='rgba(255,255,255,.5)';ctx.beginPath();ctx.ellipse(0,-56,40,46,0,0,TAU);ctx.fill();ctx.globalCompositeOperation='source-over';}
+  ctx.fillStyle='#fff';ctx.strokeStyle='#4527a0';ctx.lineWidth=4;ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.strokeText('🔒むてき',0,-114);ctx.fillText('🔒むてき',0,-114);ctx.textAlign='left';
+  ctx.restore();
+}
+function drawMecha(cx,bot,a,e){
+  ctx.save();ctx.translate(cx,bot);
+  const sw=Math.sin(a*.2)*3;
+  // ジェット
+  ctx.fillStyle=`rgba(255,${150+Math.random()*80|0},0,.8)`;ctx.beginPath();ctx.moveTo(-14,-4);ctx.lineTo(-10,10+Math.random()*6);ctx.lineTo(-6,-4);ctx.moveTo(6,-4);ctx.lineTo(10,10+Math.random()*6);ctx.lineTo(14,-4);ctx.fill();
+  ctx.fillStyle='#546e7a';ctx.fillRect(-16,-20,12,18);ctx.fillRect(4,-20,12,18);
+  // 胴
+  ctx.fillStyle='#78909c';ctx.beginPath();ctx.roundRect(-22,-56,44,38,6);ctx.fill();
+  ctx.fillStyle='#ffca28';ctx.beginPath();ctx.moveTo(0,-50);for(let i=0;i<=6;i++){const g=Math.PI+i*Math.PI/6;ctx.lineTo(Math.cos(g)*12,-36+Math.sin(g)*12);}ctx.closePath();ctx.fill(); // ホタテマーク
+  ctx.fillStyle='#455a64';for(const [x,y] of [[-18,-52],[18,-52],[-18,-22],[18,-22]]){ctx.beginPath();ctx.arc(x,y,2,0,TAU);ctx.fill();}
+  // うで（ミサイル発射台）
+  ctx.fillStyle='#607d8b';ctx.beginPath();ctx.roundRect(-34,-54+sw,12,26,4);ctx.fill();
+  ctx.beginPath();ctx.roundRect(22,-54-sw,12,26,4);ctx.fill();
+  ctx.fillStyle='#d32f2f';ctx.beginPath();ctx.roundRect(-36,-60+sw,16,8,3);ctx.fill();
+  // 頭
+  ctx.fillStyle='#90a4ae';ctx.beginPath();ctx.roundRect(-16,-78,32,22,6);ctx.fill();
+  ctx.fillStyle='#000';ctx.beginPath();ctx.roundRect(-13,-72,26,8,4);ctx.fill();
+  const sx=Math.sin(a*.08)*8;ctx.fillStyle='#ff1744';ctx.beginPath();ctx.ellipse(sx,-68,5,3,0,0,TAU);ctx.fill();
+  ctx.strokeStyle='#90a4ae';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-78);ctx.lineTo(0,-88);ctx.stroke();
+  ctx.fillStyle=Math.floor(a/8)%2?'#ff1744':'#ffeb3b';ctx.beginPath();ctx.arc(0,-90,3,0,TAU);ctx.fill();
+  if(e.flash>0){ctx.globalCompositeOperation='lighter';ctx.fillStyle='rgba(255,255,255,.45)';ctx.fillRect(-36,-92,72,92);ctx.globalCompositeOperation='source-over';}
+  ctx.restore();
+}
+function drawHone(cx,bot,a,e){
+  ctx.save();ctx.translate(cx,bot-26);
+  const f=Math.sin(a*.18);
+  // つばさ（ほね）
+  ctx.strokeStyle='#eceff1';ctx.lineWidth=3;
+  for(const s of [-1,1]){
+    ctx.beginPath();ctx.moveTo(4,-6);ctx.lineTo(10,-34-f*14*s);ctx.lineTo(30,-28-f*12*s);ctx.moveTo(10,-34-f*14*s);ctx.lineTo(18,-14);ctx.moveTo(10,-34-f*14*s);ctx.lineTo(36,-14-f*8*s);ctx.stroke();
+    ctx.fillStyle='rgba(149,117,205,.35)';ctx.beginPath();ctx.moveTo(4,-6);ctx.lineTo(10,-34-f*14*s);ctx.lineTo(30,-28-f*12*s);ctx.lineTo(36,-14-f*8*s);ctx.closePath();ctx.fill();
+  }
+  // せぼね
+  ctx.strokeStyle='#eceff1';ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(-26,-4);ctx.quadraticCurveTo(10,8,40,0+Math.sin(a*.1)*4);ctx.stroke();
+  ctx.lineWidth=2;for(let i=0;i<6;i++){const x=-14+i*9;ctx.beginPath();ctx.moveTo(x,-2);ctx.lineTo(x+2,10);ctx.stroke();}
+  // ずがいこつ
+  ctx.fillStyle='#f5f5f5';ctx.beginPath();ctx.ellipse(-30,-8,14,11,0,0,TAU);ctx.fill();
+  ctx.beginPath();ctx.moveTo(-40,-6);ctx.lineTo(-56,-2);ctx.lineTo(-54,4);ctx.lineTo(-36,4);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#fff';for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(-52+i*4,4);ctx.lineTo(-50+i*4,9);ctx.lineTo(-48+i*4,4);ctx.fill();}
+  ctx.fillStyle='#212121';ctx.beginPath();ctx.ellipse(-30,-10,5,4,0,0,TAU);ctx.fill();
+  ctx.fillStyle=`rgba(224,64,251,${.6+Math.sin(a*.3)*.4})`;ctx.beginPath();ctx.arc(-30,-10,2.6,0,TAU);ctx.fill();
+  ctx.strokeStyle='#f5f5f5';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-24,-16);ctx.lineTo(-16,-28);ctx.moveTo(-30,-18);ctx.lineTo(-28,-30);ctx.stroke();
+  // しっぽの炎
+  ctx.fillStyle='rgba(224,64,251,.7)';ctx.beginPath();ctx.arc(42,Math.sin(a*.1)*4,6+Math.sin(a*.4)*2,0,TAU);ctx.fill();
+  if(e.flash>0){ctx.globalCompositeOperation='lighter';ctx.fillStyle='rgba(255,255,255,.45)';ctx.beginPath();ctx.ellipse(0,-6,50,26,0,0,TAU);ctx.fill();ctx.globalCompositeOperation='source-over';}
+  ctx.restore();
+}
+function drawKage(cx,bot,a,e){
+  ctx.fillStyle=`rgba(124,77,255,${.25+Math.sin(a*.2)*.1})`;ctx.beginPath();ctx.ellipse(cx,bot-32,30,40,0,0,TAU);ctx.fill();
+  // 残像
+  ctx.save();ctx.globalAlpha=.3;drawNinja(cx+14,bot,a-6,e);ctx.restore();
+  drawNinja(cx,bot,a,e);
+  ctx.fillStyle='#e040fb';ctx.beginPath();ctx.arc(cx-2,bot-54,2.2,0,TAU);ctx.arc(cx-9,bot-54,2.2,0,TAU);ctx.fill();
+}
+// ヨロイ・HP表示（敵の絵の上にかさねる）
+function drawHardOverlay(e,cx,bot){
+  const h0=e.h/(e.sc||1);
+  if(e.armor){
+    ctx.fillStyle='#90a4ae';ctx.strokeStyle='#455a64';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(cx,bot-h0+6,16,Math.PI,0);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.fillStyle='#ffd54f';ctx.beginPath();ctx.moveTo(cx-4,bot-h0-8);ctx.lineTo(cx,bot-h0-20);ctx.lineTo(cx+4,bot-h0-8);ctx.fill();
+  }
+  if(e.hp&&e.type!=='maou'){
+    for(let i=0;i<e.maxHp;i++){
+      ctx.fillStyle=i<e.hp?'#ff1744':'rgba(0,0,0,.35)';
+      ctx.beginPath();ctx.arc(cx-(e.maxHp-1)*5+i*10,bot-h0-(e.armor?26:10),4,0,TAU);ctx.fill();
+    }
+  }
+}
+function drawHardShot(s,sx){
+  if(s.type==='missile'){
+    const g=Math.atan2(s.vy,s.vx);
+    ctx.save();ctx.translate(sx,s.y);ctx.rotate(g);
+    ctx.fillStyle='rgba(255,152,0,.7)';ctx.beginPath();ctx.arc(-12,0,4+Math.random()*3,0,TAU);ctx.fill();
+    ctx.fillStyle='#eceff1';ctx.beginPath();ctx.roundRect(-10,-4,18,8,4);ctx.fill();
+    ctx.fillStyle='#d32f2f';ctx.beginPath();ctx.moveTo(8,-4);ctx.lineTo(14,0);ctx.lineTo(8,4);ctx.fill();
+    ctx.beginPath();ctx.moveTo(-10,-4);ctx.lineTo(-14,-8);ctx.lineTo(-6,-4);ctx.moveTo(-10,4);ctx.lineTo(-14,8);ctx.lineTo(-6,4);ctx.fill();
+    ctx.restore();return true;
+  }
+  if(s.type==='porb'){
+    ctx.fillStyle='rgba(224,64,251,.35)';ctx.beginPath();ctx.arc(sx,s.y,13,0,TAU);ctx.fill();
+    ctx.fillStyle='#ea80fc';ctx.beginPath();ctx.arc(sx,s.y,6,0,TAU);ctx.fill();
+    return true;
+  }
+  return false;
+}
+
+// ─── 上限突破 Lv11〜13 ─────────────────────────────────────────────────────
+function updateHardPlayer(){
+  if(!hardOn&&isHard()){
+    hardOn=true;sfxWarn();shake=14;
+    banners.push({text:'⚠️ ハードモード突入！',sub:'強い敵が出るぞ！仲間もパワーアップ！',life:220,col:'#ff8a80'});
+    if(mount)mountHP=Math.max(mountHP,2);
+  }
+  if(novaCD>0)novaCD--;
+  // Lv12〜：ホタテ衛星
+  if(shellLv>=12){
+    satA+=0.09;
+    const [cw,ch]=pdim();const ox=px+cw/2,oy=py+ch/2;
+    for(let k=0;k<3;k++){
+      const sx=ox+Math.cos(satA+k*TAU/3)*72,sy=oy+Math.sin(satA+k*TAU/3)*60;
+      for(const e of enemies){
+        if(e.dead||e.invul||e.hitCool>0)continue;
+        const ex=e.x-scrollX;
+        if(hit(sx-16,sy-16,32,32,ex,e.y,e.w,e.h))hurtEnemy(e,1,'#ffd54f');
+      }
+    }
+  }
+}
+function fireNova(){
+  if(shellLv<13||novaCD>0)return;
+  novaCD=70;
+  const [cw,ch]=pdim();
+  rings.push({x:px+cw/2,y:py+ch/2,r:20,life:22,nova:1});
+  for(const e of enemies){
+    if(e.dead||e.invul)continue;const ex=e.x-scrollX;
+    if(ex>-20&&ex<W)hurtEnemy(e,2,'#ff80ab');
+  }
+  flashT=Math.max(flashT,4);
+}
+function drawSats(){
+  if(shellLv<12||state!=='playing'&&state!=='show')return;
+  const [cw,ch]=pdim();const ox=px+cw/2,oy=py+ch/2;
+  for(let k=0;k<3;k++){
+    const sx=ox+Math.cos(satA+k*TAU/3)*72,sy=oy+Math.sin(satA+k*TAU/3)*60;
+    ctx.fillStyle='rgba(255,213,79,.35)';ctx.beginPath();ctx.arc(sx,sy,20,0,TAU);ctx.fill();
+    ctx.save();ctx.translate(sx,sy);ctx.rotate(satA*3);
+    if(SIMG.complete&&SIMG.naturalWidth>0)ctx.drawImage(SIMG,-15,-15,30,30);
+    else{ctx.fillStyle='#ffd54f';ctx.beginPath();ctx.arc(0,0,14,0,TAU);ctx.fill();}
+    ctx.restore();
+  }
+}
+// 虹色バリア（プレイヤーのまわり）
+function drawRbShield(x,y,sc){
+  if(rbShield<=0)return;
+  for(let i=0;i<rbShield+2;i++){
+    ctx.strokeStyle=`hsla(${(frame*6+i*60)%360},100%,65%,.7)`;ctx.lineWidth=4;
+    ctx.beginPath();ctx.ellipse(x,y,(54+i*5)*sc,(66+i*5)*sc,0,0,TAU);ctx.stroke();
+  }
+  ctx.fillStyle=`hsla(${frame*6%360},100%,80%,.12)`;ctx.beginPath();ctx.ellipse(x,y,54*sc,66*sc,0,0,TAU);ctx.fill();
+}
+// スーパー化した仲間のオーラ
+function drawSuperAura(x,y,sc){
+  for(let i=0;i<6;i++){
+    const g=frame*.12+i*TAU/6;
+    ctx.fillStyle=`rgba(255,215,0,${.55+Math.sin(frame*.3+i)*.3})`;
+    ctx.beginPath();ctx.arc(x+Math.cos(g)*58*sc,y+Math.sin(g)*40*sc,3*sc,0,TAU);ctx.fill();
+  }
+  ctx.strokeStyle=`rgba(255,215,0,${.35+Math.sin(frame*.2)*.15})`;ctx.lineWidth=3;
+  ctx.beginPath();ctx.ellipse(x,y,62*sc,48*sc,0,0,TAU);ctx.stroke();
+}
 
 function die(){
   state='dead';sfxHurt();sfxGameOver();saveBest(score);stopBGM();
@@ -912,6 +1208,7 @@ function updateEnemy(e){
 // 新しい敵の動き（v12）。updateEnemy の最初で呼ばれ、処理したら true
 let eshots=[];  // 敵の弾（雷・光の弾）ワールド座標
 function updateEnemy2(e){
+  if(updateHard(e))return true;
   const ex=e.x-scrollX;
   switch(e.type){
     case 'koumori':
@@ -987,6 +1284,7 @@ function updateEnemy2(e){
 function updateShots(){
   const [cw,ch]=pdim();
   for(const s of eshots){
+    if(s.home&&s.life>70){const dx=px+30-(s.x-scrollX),dy=py+40-s.y,d=Math.hypot(dx,dy)||1;s.vx+=(dx/d*4-s.vx)*.05;s.vy+=(dy/d*4-s.vy)*.05;}
     s.x+=s.vx+(s.type==='bolt'?spd*0.55:0);s.y+=s.vy;s.life--;
     const sx=s.x-scrollX,r=s.type==='bolt'?9:8;
     if(giantT>0)continue;
@@ -1002,6 +1300,7 @@ function updateShots(){
 function drawShots(){
   for(const s of eshots){
     const sx=s.x-scrollX;
+    if(drawHardShot(s,sx))continue;
     if(s.type==='shuriken'){
       ctx.save();ctx.translate(sx,s.y);ctx.rotate(frame*.5);
       ctx.fillStyle='#455a64';
@@ -1039,8 +1338,8 @@ function handleInput(){
   }else{
     const [cw,ch]=pdim(),pt=mount==='ptera';  // ピピはジャンプ力UP
     if(!jumping){pvy=pt?-19.5:-16;jumping=true;sfxJump();spawnDust(px+cw/2,py+ch);}
-    else if(featherT>0||mount==='dragon'){pvy=pt?-17:-15;sfxJump();}   // ドラコは何回でも空中ジャンプ
-    else if(mount==='bike'&&airJ<1){pvy=-14.5;airJ++;sfxJump2();}       // ブンブンは3段ジャンプ
+    else if(featherT>0||mount==='dragon'||(mount==='ptera'&&isHard())){pvy=pt?-17:-15;sfxJump();}   // ドラコは何回でも空中ジャンプ
+    else if(mount==='bike'&&airJ<(isHard()?2:1)){pvy=-14.5;airJ++;sfxJump2();}       // ブンブンは3段ジャンプ
     else if(!dblJump){pvy=pt?-17:-14;dblJump=true;sfxJump2();}
   }
 }
@@ -1461,9 +1760,11 @@ function drawPups(){
       ctx.beginPath();ctx.moveTo(0,-22);ctx.lineTo(0,20);ctx.stroke();
       for(let i=0;i<4;i++){const yo=-14+i*9;ctx.beginPath();ctx.moveTo(0,yo);ctx.lineTo(9,yo+4);ctx.stroke();ctx.beginPath();ctx.moveTo(0,yo);ctx.lineTo(-9,yo+4);ctx.stroke();}
       ctx.fillStyle='rgba(255,255,255,0.88)';ctx.font='bold 8px Arial';ctx.textAlign='center';ctx.fillText('🪶',0,4);
-    }else if(p.type==='shield'){
-      ctx.rotate(Math.sin(p.ph)*.12);drawShieldShape(0,0,18);
-      ctx.fillStyle='#fff';ctx.font='bold 9px Arial';ctx.textAlign='center';ctx.fillText('盾',0,30);
+    }else if(p.type==='shield'||p.type==='rbshield'){
+      ctx.rotate(Math.sin(p.ph)*.12);
+      if(p.type==='rbshield'){for(let i=0;i<6;i++){ctx.strokeStyle='hsla('+((frame*6+i*60)%360)+',100%,65%,.85)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,22+i*3,0,Math.PI*2);ctx.stroke();}}
+      drawShieldShape(0,0,18);
+      ctx.fillStyle='#fff';ctx.font='bold 9px Arial';ctx.textAlign='center';ctx.fillText(p.type==='rbshield'?'虹バリア':'盾',0,p.type==='rbshield'?44:30);
     }else{// shell
       ctx.rotate(Math.sin(p.ph)*.14);
       if(SIMG.complete&&SIMG.naturalWidth>0)ctx.drawImage(SIMG,-18,-18,36,36);
@@ -1482,7 +1783,7 @@ function drawEnemies(){
     ctx.save();ctx.globalAlpha=e.type==='kurage'?e.alpha:1;
     const cx=ex+e.w/2,bot=e.y+e.h,a=e.anim;
     if(e.sc&&e.sc!==1){ctx.translate(cx,bot);ctx.scale(e.sc,e.sc);ctx.translate(-cx,-bot);}  // 大きさ
-    if(drawEnemy2(e,cx,bot,a)){ctx.restore();continue;}
+    if(drawEnemy2(e,cx,bot,a)){drawHardOverlay(e,cx,bot);ctx.restore();continue;}
     switch(e.type){
       case 'lemon':    drawLemon(cx,bot,a);break;
       case 'yadokari': drawYadokari(cx,bot,a);break;
@@ -1498,6 +1799,7 @@ function drawEnemies(){
       case 'kingcrab': drawKingCrab(cx,bot,a);break;
       case 'maou':     drawMaou(cx,bot,a,e);break;
     }
+    drawHardOverlay(e,cx,bot);
     ctx.restore();
   }
 }
@@ -1805,6 +2107,7 @@ function drawMaou(cx,bot,a,e){
 }
 // ─── 新しい敵の絵（v12）。原点の考え方は他と同じ（cx=中心x, bot=足元y）──────
 function drawEnemy2(e,cx,bot,a){
+  if(drawHard(e,cx,bot,a))return true;
   switch(e.type){
     case 'koumori':  drawKoumori(cx,bot,a,e);return true;
     case 'hage':     drawHage(cx,bot,a);return true;
@@ -2180,6 +2483,9 @@ function drawPlayer(){
     ctx.restore();
   }
   if(shieldOn)drawShieldOn(cx2,py+ch*.48,giantSc);
+  drawRbShield(cx2,py+ch/2,giantSc);
+  if(mount&&isHard())drawSuperAura(cx2,py+ch*.6,giantSc);
+  drawSats();
   ctx.globalAlpha=1;
 }
 // 装備中のホタテの盾（体の前で光る）
@@ -2341,8 +2647,8 @@ function drawFlames(){
 function drawRings(){
   drawZaps();
   for(const r of rings){
-    ctx.strokeStyle=`rgba(255,255,255,${r.life/22*.8})`;ctx.lineWidth=6;
-    ctx.beginPath();ctx.ellipse(r.x,r.y,r.r,r.r*.28,0,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle=r.nova?`hsla(${(frame*8)%360},100%,70%,${r.life/22})`:`rgba(255,255,255,${r.life/22*.8})`;ctx.lineWidth=r.nova?10:6;
+    ctx.beginPath();ctx.ellipse(r.x,r.y,r.r,r.r*(r.nova?1:.28),0,0,Math.PI*2);ctx.stroke();
   }
 }
 // ─── 追加の仲間（ドラコ・リュウ・ブーブー・ブンブン）の絵 ─────────────────
@@ -2514,7 +2820,7 @@ function drawHUD(){
   let yy=42;
   // ライフ
   ctx.font='18px sans-serif';ctx.textAlign='right';
-  ctx.fillText((shieldOn?'🛡️':'')+(mount?'❤️❤️':'❤️'),W-12,28);
+  ctx.fillText((rbShield?'🌈'+rbShield+' ':'')+(shieldOn?'🛡️':'')+(mount?(mountHP>1?'💛':'')+'❤️❤️':'❤️'),W-12,28);
   ctx.textAlign='left';
   if(mount){
     const M=MOUNTS[mount];
@@ -2539,9 +2845,10 @@ function drawHUD(){
   }
   if(shellLv>0){
     const lbs=['','🐚 Lv1 ダブルホタテ','🐚 Lv2 三発扇形','🐚 Lv3 五発扇形','🐚 Lv4 七発＋後方','🐚 Lv5 前後ホタテ','🐚 Lv6 全周12発','🐚 Lv7 全方位16発',
-               '💥 Lv8 ホタテビーム','✨ Lv9 ビーム＋ホーミング','☄️ Lv10 MAX ホタテメテオ'];
+               '💥 Lv8 ホタテビーム','✨ Lv9 ビーム＋ホーミング','☄️ Lv10 MAX ホタテメテオ',
+               '🌈 Lv11 ギガビーム','🛰️ Lv12 ホタテ衛星','💫 Lv13 ULTRA ホタテ・ノヴァ'];
     ctx.fillStyle=shellLv>=8?`hsl(${frame*6%360},100%,70%)`:'rgba(255,200,50,.88)';
-    ctx.font=shellLv>=8?'bold 12px sans-serif':'bold 10px Arial';ctx.textAlign='center';ctx.fillText(lbs[Math.min(shellLv,10)],W/2,yy+9);ctx.textAlign='left';
+    ctx.font=shellLv>=8?'bold 12px sans-serif':'bold 10px Arial';ctx.textAlign='center';ctx.fillText(lbs[Math.min(shellLv,13)],W/2,yy+9);ctx.textAlign='left';
   }
   // お知らせ（仲間・ステージ）
   const b=banners[banners.length-1];
