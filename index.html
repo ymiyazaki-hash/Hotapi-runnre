@@ -49,7 +49,7 @@ canvas{display:block;width:100%;border:2px solid #4444ff88;border-radius:10px;bo
         <div class="hr"><span class="ic">👆</span><span>タップ → ジャンプ（2回で二段ジャンプ）</span></div>
         <div class="hr"><span class="ic">⚡</span><span>ダブルタップ → <b style="color:#ffd700">ホタテ</b>を投げて敵を倒す</span></div>
         <div class="hr"><span class="ic">🦖</span><span><b style="color:#9cff57">仲間</b>（5000点〜）にタッチ → 背中に乗れる！ミス1回OK</span></div>
-        <div class="hr"><span class="ic">✨</span><span style="font-size:.92em">仲間は8種類！🦖🦏🦅🐘🐲🐉🚗🏍️</span></div>
+        <div class="hr"><span class="ic">✨</span><span style="font-size:.92em">仲間は9種類！🦈🦖🦏🦅🐘🐲🐉🚗🏍️</span></div>
         <div class="hr"><span class="ic">🪙</span><span>コイン +50点 ／ 👾 敵を倒す +150点</span></div>
       </div>
       <div class="warn">❤️ ライフは1本！仲間に乗ると ❤️❤️ になる！</div>
@@ -221,6 +221,7 @@ const MOUNTS={
   dragon:  {name:'ドラコ',ic:'🐲',col:'#ef9a9a',saddle:'#ffd600',short:'空中ジャンプ無限＆火の玉',skill:'何回でも空中ジャンプ！大きな火の玉をはく'},
   ryu:     {name:'リュウ',ic:'🐉',col:'#80cbc4',saddle:'#c62828',short:'カミナリ',skill:'カミナリで画面の敵をまとめてやっつける！'},
   car:     {name:'ブーブー',ic:'🚗',col:'#ef5350',saddle:'#212121',short:'体当たり＆オートジャンプ',skill:'敵をはねとばす！穴の前で自動ジャンプ'},
+  shark:   {name:'シャーキー',ic:'🦈',col:'#81d4fa',saddle:'#ff7043',short:'波乗り＆大波',skill:'波に乗って穴に落ちない！大波で敵を流す'},
   bike:    {name:'ブンブン',ic:'🏍️',col:'#ffb74d',saddle:'#212121',short:'3段ジャンプ＆ふみつけ',skill:'3段ジャンプ！上から敵をふみつけてやっつける'}
 };
 
@@ -503,6 +504,11 @@ function update(){
   if(mount==='dragon'){autoFireT--;if(autoFireT<=0){dragonBall();autoFireT=isHard()?80:150;}}
   if(mount==='ryu'){autoFireT--;if(autoFireT<=0)autoFireT=ryuThunder()?(isHard()?120:220):20;}
   // ブーブー：穴の手前で自動ジャンプ
+  // シャーキー：波に乗るので穴に落ちない／ときどき大波
+  if(mount==='shark'&&!onGnd&&pvy>=0&&py+ch>=GROUND){
+    py=GROUND-ch;pvy=0;jumping=false;airJ=0;if(featherT<=0)dblJump=false;onGnd=true;
+  }
+  if(mount==='shark'){autoFireT--;if(autoFireT<=0){bigWave();autoFireT=isHard()?75:140;}}
   if(mount==='car'&&onGnd&&!jumping){
     const fx=scrollX+px+cw+24;
     if(!plats.some(p=>!p.cloud&&p.x<=fx&&fx<=p.x+p.w&&Math.abs(p.y-(py+ch))<130)){pvy=-17;jumping=true;sfxJump();}
@@ -783,7 +789,14 @@ function sfxMountVoice(tp){
   if(tp==='car'){beep(440,'square',.12,.18);beep(440,'square',.12,.18,.18);slide(70,200,'sawtooth',.6,.14,.3);}
   else if(tp==='bike'){slide(90,320,'sawtooth',.5,.16);slide(120,380,'sawtooth',.4,.12,.45);}
   else if(tp==='dragon'){wobble(130,.6,.3,14,50,'sawtooth');}
+  else if(tp==='shark'){noise(.8,.35,1800,'lowpass',0,250);beep(330,'triangle',.15,.2,.3);beep(440,'triangle',.25,.2,.42);}
   else if(tp==='ryu'){[392,523,659,784].forEach((f,i)=>beep(f,'sine',.25,.2,i*.12));}
+}
+function bigWave(){
+  const gs=giantSc,[cw,ch]=pdim();
+  const n=isHard()?2:1;
+  for(let i=0;i<n;i++)flames.push({x:px+cw+10+i*40,y:py+ch-32*gs,vx:7.5,vy:0,r:30*gs,life:70,grow:0,water:1});
+  noise(.6,.3,1500,'lowpass',0,250);
 }
 // ─── ステージ（背景）────────────────────────────────────────────────────
 // 昼 → 夕やけ → 夜の森 → おばけの森 → 火山 → 雲の上 → 宇宙の入り口 → 惑星 → 銀河の果て
@@ -2467,12 +2480,12 @@ function drawPlayer(){
     }
     drawMountBody(mount,frame,jumping);
     ctx.save();
-    ctx.translate(-6,(({car:-79,ryu:-84,dragon:-89})[mount]??-87)+(jumping?0:Math.sin(frame*.6)*1.2));
+    ctx.translate(-6,(({car:-79,ryu:-84,dragon:-89,shark:-96})[mount]??-87)+(jumping?0:Math.sin(frame*.6)*1.2));
     ctx.rotate(jumping?-.08:0);
     ctx.drawImage(charCache,-31,-41,62,82);
     ctx.restore();
     drawMountFront(mount);
-    if(mount!=='car'&&mount!=='bike'&&mount!=='ryu')drawSaddle(mount);
+    if(mount!=='car'&&mount!=='bike'&&mount!=='ryu'&&mount!=='shark')drawSaddle(mount);
     ctx.restore();
   }else{
     ctx.save();
@@ -2519,6 +2532,7 @@ function mLeg(x,y,ang,w,h,col,foot){
   ctx.restore();
 }
 function drawMountBody(tp,a,air){
+  if(tp==='shark'){drawShark(a,air);return;}
   if(tp==='dragon'||tp==='ryu'||tp==='car'||tp==='bike'){drawMountBody2(tp,a,air);return;}
   const s=air?0.5:Math.sin(a*.35);
   ctx.lineCap='round';
@@ -2637,6 +2651,7 @@ function drawExMounts(){
 }
 function drawFlames(){
   for(const f of flames){
+    if(f.water){drawWaterWave(f);continue;}
     const al=Math.min(1,Math.max(0,f.life/38));
     ctx.fillStyle=`rgba(255,${Math.floor(90+f.life*3)},0,${al*.8})`;
     ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);ctx.fill();
@@ -2813,6 +2828,57 @@ function drawZaps(){
     const line=()=>{ctx.beginPath();pts.forEach(([px2,py2],i)=>i?ctx.lineTo(px2,py2):ctx.moveTo(px2,py2));ctx.stroke();};
     line();ctx.strokeStyle=`rgba(255,255,255,${al})`;ctx.lineWidth=4;line();
   }
+}
+// シャーキー（サメ）：波に乗って走る
+function drawShark(a,air){
+  const w=Math.sin(a*.12);
+  // 波
+  if(!air){
+    ctx.fillStyle='rgba(41,121,255,.85)';
+    ctx.beginPath();ctx.moveTo(-80,2);
+    for(let x=-80;x<=74;x+=6)ctx.lineTo(x,-14-Math.sin(x*.08+a*.25)*4-(x<-40?(x+80)*.6:0));
+    ctx.quadraticCurveTo(-46,-60,-84,-44+w*4);ctx.quadraticCurveTo(-70,-40,-74,-30);ctx.lineTo(-80,2);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(129,212,250,.9)';
+    ctx.beginPath();ctx.moveTo(-80,2);for(let x=-80;x<=74;x+=6)ctx.lineTo(x,-6-Math.sin(x*.1+a*.3)*3);ctx.lineTo(74,2);ctx.closePath();ctx.fill();
+    // 白いしぶき
+    ctx.fillStyle='#fff';
+    for(let i=0;i<7;i++){const x=-76+i*22+((a*2)%22),y=-14-Math.sin(x*.08+a*.25)*4;ctx.beginPath();ctx.arc(x,y,3.5,0,TAU);ctx.fill();}
+    ctx.beginPath();ctx.arc(-84,-44+w*4,5,0,TAU);ctx.arc(-76,-50+w*4,4,0,TAU);ctx.arc(-66,-52+w*3,3,0,TAU);ctx.fill();
+    for(let i=0;i<4;i++){const t=((a*3+i*9)%36)/36;ctx.fillStyle=`rgba(255,255,255,${1-t})`;ctx.beginPath();ctx.arc(70+t*12,-18-t*16+i*3,2.5,0,TAU);ctx.fill();}
+  }
+  ctx.save();ctx.translate(0,air?0:w*2);ctx.rotate(air?-.12:w*.04);
+  // しっぽ
+  ctx.fillStyle='#546e7a';
+  ctx.beginPath();ctx.moveTo(-40,-38);ctx.lineTo(-66,-62+w*4);ctx.lineTo(-58,-38);ctx.lineTo(-66,-18-w*4);ctx.closePath();ctx.fill();
+  // 背びれ
+  ctx.beginPath();ctx.moveTo(-34,-52);ctx.quadraticCurveTo(-30,-78,-14,-84);ctx.quadraticCurveTo(-20,-66,-12,-54);ctx.closePath();ctx.fill();
+  // からだ
+  ctx.fillStyle='#78909c';ctx.beginPath();ctx.ellipse(0,-38,48,18,0,0,TAU);ctx.fill();
+  ctx.beginPath();ctx.moveTo(40,-48);ctx.quadraticCurveTo(66,-42,60,-30);ctx.lineTo(36,-26);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#eceff1';ctx.beginPath();ctx.ellipse(8,-28,40,9,0,0,TAU);ctx.fill();
+  // むなびれ
+  ctx.fillStyle='#546e7a';ctx.beginPath();ctx.moveTo(6,-30);ctx.lineTo(-10,-12+w*3);ctx.lineTo(18,-28);ctx.closePath();ctx.fill();
+  // エラ
+  ctx.strokeStyle='#546e7a';ctx.lineWidth=2;for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(26+i*4,-44);ctx.quadraticCurveTo(24+i*4,-38,26+i*4,-32);ctx.stroke();}
+  // 口（ニカッと笑う歯）
+  ctx.fillStyle='#b71c1c';ctx.beginPath();ctx.moveTo(38,-30);ctx.quadraticCurveTo(50,-22,62,-30);ctx.quadraticCurveTo(50,-27,38,-30);ctx.fill();
+  ctx.fillStyle='#fff';for(let i=0;i<5;i++){const x=40+i*4.5;ctx.beginPath();ctx.moveTo(x,-30);ctx.lineTo(x+2,-26);ctx.lineTo(x+4,-30);ctx.fill();}
+  // 目
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(44,-42,5,0,TAU);ctx.fill();
+  ctx.fillStyle='#000';ctx.beginPath();ctx.arc(45.5,-42,2.8,0,TAU);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(46.5,-43.5,1,0,TAU);ctx.fill();
+  ctx.strokeStyle='#37474f';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(38,-49);ctx.lineTo(50,-48);ctx.stroke();
+  ctx.restore();
+}
+// 大波こうげきの絵
+function drawWaterWave(f){
+  const al=Math.min(1,f.life/20);
+  ctx.save();ctx.globalAlpha=al;ctx.translate(f.x,f.y);
+  ctx.fillStyle='rgba(41,121,255,.8)';
+  ctx.beginPath();ctx.moveTo(-30,30);ctx.quadraticCurveTo(-26,-20,8,-34);ctx.quadraticCurveTo(30,-38,32,-20);ctx.quadraticCurveTo(18,-26,12,-14);ctx.quadraticCurveTo(22,8,30,30);ctx.closePath();ctx.fill();
+  ctx.fillStyle='rgba(179,229,252,.9)';ctx.beginPath();ctx.moveTo(-26,30);ctx.quadraticCurveTo(-20,0,0,-16);ctx.lineTo(4,30);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#fff';for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(10+i*5-((frame+i*7)%6),-34+i*2+Math.sin(frame*.3+i)*2,3.5,0,TAU);ctx.fill();}
+  ctx.restore();
 }
 
 // ─── HUD ───────────────────────────────────────────────────────────────────
